@@ -6,6 +6,7 @@ use Laminas\Diactoros\ResponseFactory;
 use Laminas\HttpHandlerRunner\Emitter\SapiEmitter;
 use YourProject\Controller\HelloWorldController;
 use YourProject\Middleware\ExampleMiddleware;
+use YourProject\Middleware\CheckHeaderMiddleware;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -16,6 +17,19 @@ $container = $containerBuilder->build();
 $dispatcher = FastRoute\simpleDispatcher(function (RouteCollector $r) {
     $r->addRoute('GET', '/hello/{name}', [
         'handler' => HelloWorldController::class
+    ]);
+    $r->addRoute('GET', '/mello/{name}', [
+        'handler' => HelloWorldController::class,
+        'middleware' => [
+            ExampleMiddleware::class
+        ]
+    ]);
+    $r->addRoute('GET', '/nia/{name}', [
+        'handler' => HelloWorldController::class,
+        'middleware' => [
+            ExampleMiddleware::class,
+            CheckHeaderMiddleware::class,
+        ]
     ]);
 });
 
