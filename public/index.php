@@ -16,21 +16,16 @@ $container = $containerBuilder->build();
 
 $dispatcher = FastRoute\simpleDispatcher(function (RouteCollector $r) {
     $r->addRoute('GET', '/hello/{name}', [
-        'handler' => HelloWorldController::class
+        'handler' => [HelloWorldController::class, 'sayHello'],
     ]);
-    $r->addRoute('GET', '/mello/{name}', [
-        'handler' => HelloWorldController::class,
+    $r->addRoute('GET', '/nia/{name}', [
+        'handler' => [HelloWorldController::class, 'sayHello'],
         'middleware' => [
+            CheckHeaderMiddleware::class,
             ExampleMiddleware::class
         ]
     ]);
-    $r->addRoute('GET', '/nia/{name}', [
-        'handler' => HelloWorldController::class,
-        'middleware' => [
-            ExampleMiddleware::class,
-            CheckHeaderMiddleware::class,
-        ]
-    ]);
+    
 });
 
 $request = ServerRequestFactory::fromGlobals();
@@ -38,47 +33,51 @@ $request = ServerRequestFactory::fromGlobals();
 $httpMethod = $request->getMethod();
 $uri = $request->getUri()->getPath();
 
+// Trim query string (?foo=bar) and decode URI
+if (false !== $pos = strpos($uri, '?')) {
+    $uri = substr($uri, 0, $pos);
+}
+$uri = rawurldecode($uri);
+
+// Create a ServerRequest object
+$serverRequest = \Laminas\Diactoros\ServerRequestFactory::fromGlobals(
+    $_SERVER,
+    $_GET,
+    $_POST,
+    $_COOKIE,
+    $_FILES
+);
+
 $routeInfo = $dispatcher->dispatch($httpMethod, $uri);
-
 switch ($routeInfo[0]) {
+    case FastRoute\Dispatcher::NOT_FOUND:
+        // Handle 404
+        $response = new \Laminas\Diactoros\Response\JsonResponse(['error' => 'Not Found'], 404);
+        break;
+    case FastRoute\Dispatcher::METHOD_NOT_ALLOWED:
+        // Handle 405
+        $response = new \Laminas\Diactoros\Response\JsonResponse(['error' => 'Method Not Allowed'], 405);
+        break;
     case FastRoute\Dispatcher::FOUND:
-        $handler = $container->get($routeInfo[1]['handler']);
-        $middlewares = $routeInfo[1]['middleware'] ?? [];
-        $parameters = $routeInfo[2] ?? [];
+        $handler = $routeInfo[1]['handler'];
+        $vars = $routeInfo[2];
 
-        $request = $request->withAttribute('parameters', $parameters);
+        // Initialize the middleware queue
+        $middlewareQueue = new \SplQueue();
 
-        $middlewarePipe = new class($handler) implements Psr\Http\Server\RequestHandlerInterface {
-            private $handler;
-            public function __construct($handler) {
-                $this->handler = $handler;
+        // Check if middleware is defined for the route
+        if (isset($routeInfo[1]['middleware'])) {
+            $middleware = $routeInfo[1]['middleware'];
+            foreach ($middleware as $middlewareClass) {
+                $middlewareQueue->enqueue(new $middlewareClass());
             }
-            public function handle(Psr\Http\Message\ServerRequestInterface $request): Psr\Http\Message\ResponseInterface {
-                return ($this->handler)($request);
-            }
-        };
-
-        foreach (array_reverse($middlewares) as $middlewareClass) {
-            $middleware = $container->get($middlewareClass);
-            $middlewarePipe = new class($middleware, $middlewarePipe) implements Psr\Http\Server\RequestHandlerInterface {
-                private $middleware;
-                private $next;
-                public function __construct($middleware, $next) {
-                    $this->middleware = $middleware;
-                    $this->next = $next;
-                }
-                public function handle(Psr\Http\Message\ServerRequestInterface $request): Psr\Http\Message\ResponseInterface {
-                    return $this->middleware->process($request, $this->next);
-                }
-            };
         }
 
-        $response = $middlewarePipe->handle($request);
-        break;
+        // Create a request handler using the middleware queue
+        $requestHandler = new \YourProject\Http\RequestHandler($middlewareQueue, $container, $handler, $vars);
 
-    default:
-        $response = (new ResponseFactory)->createResponse(404);
-        $response->getBody()->write('Not found');
+        // Get the response from the request handler
+        $response = $requestHandler->handle($serverRequest);
         break;
 }
 

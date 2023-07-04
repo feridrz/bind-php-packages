@@ -14,7 +14,7 @@ class HelloWorldController
         $this->greetingService = $greetingService;
     }
 
-    public function __invoke(ServerRequestInterface $request): ResponseInterface
+    public function sayHello(ServerRequestInterface $request): ResponseInterface
     {
         $parameters = $request->getAttribute('parameters');
         $name = $parameters['name'] ?? 'World';
